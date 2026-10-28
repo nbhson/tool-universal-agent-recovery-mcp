@@ -103,6 +103,25 @@ MCP Server (uar-mcp)                      Watchdog (uar-watchdog)
 7. **Verify** — recovery succeeded only when the agent resumes making progress or reports completion.
 8. **Repeat** — until `COMPLETED`, `BLOCKED` (retry budget exhausted), or `CANCELLED`.
 
+### Interruption scenarios → when recovery triggers
+
+| Scenario | Detected by | Resumed? |
+|----------|-------------|----------|
+| Network loss → agent CLI crashes → process dies | `isPidAlive` check | ✅ ≤ ~30s (next poll) |
+| Network loss → CLI hangs, process alive, **no pid known** | stale heartbeat (`RECOVERY_STALE_MS`) | ✅ after 10 min (default) |
+| Agent retries internally, then **exits** | dead pid | ✅ ≤ ~30s |
+| Agent retries internally, then **goes silent with process still alive** | heartbeat stale but pid alive | ❌ classified `IDLE` — never resumed (by design) |
+| Agent reports `report_interruption` before going silent | tool call | ✅ immediately (next poll) |
+
+> **Design note:** a live process with a stale heartbeat is deliberately classified as
+> `IDLE`, not `INTERRUPTED`. From the outside, "running a 15-minute test suite",
+> "stuck waiting for the network", and "waiting for the user to type the next
+> instruction" look identical — so the watchdog only resumes when it can prove the
+> agent is gone (dead pid), or when the agent itself reports the interruption.
+> The agent's own contract: try to recover on your own first, and call
+> `report_interruption` when you give up — the watchdog then takes over with its
+> own retry budget and backoff.
+
 ### Task state machine
 
 ```
