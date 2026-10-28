@@ -1,40 +1,65 @@
 {
   "name": "universal-agent-recovery",
   "version": "0.1.0",
-  "description": "Universal Coding Agent Auto-Resume System: MCP server + independent recovery watchdog",
+  "description": "Universal Coding Agent Auto-Resume System: MCP server + independent watchdog that automatically resumes interrupted OpenCode / Claude Code / generic CLI agent tasks",
   "type": "module",
-  "engines": {
-    "node": ">=22"
+  "license": "MIT",
+  "author": "nbhson",
+  "homepage": "https://github.com/nbhson/universal-agent-recovery#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nbhson/universal-agent-recovery.git"
   },
+  "bugs": {
+    "url": "https://github.com/nbhson/universal-agent-recovery/issues"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "coding-agent",
+    "opencode",
+    "claude-code",
+    "recovery",
+    "watchdog",
+    "auto-resume",
+    "agent"
+  ],
+  "bin": {
+    "uar-mcp": "bin/uar-mcp.js",
+    "uar-watchdog": "bin/uar-watchdog.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
-    "start:mcp": "node dist/mcp/server.js",
+    "start:mcp": "node dist/mcp/main.js",
     "start:watchdog": "node dist/watchdog/main.js",
     "start:demo": "node dist/examples/demo.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo": "node dist/examples/demo.js"
+    "demo": "node dist/examples/demo.js",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build"
   },
-  "keywords": [
-    "mcp",
-    "coding-agent",
-    "recovery",
-    "watchdog",
-    "auto-resume"
-  ],
-  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.0",
     "@types/node": "^24.0.0",
-    "eslint": "^10.13.0",
+    "eslint": "^9.39.0",
     "typescript": "^5.7.0",
-    "typescript-eslint": "^8.72.1",
+    "typescript-eslint": "^8.46.0",
     "vitest": "^5.0.5"
   }
 }

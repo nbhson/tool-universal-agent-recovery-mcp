@@ -159,7 +159,8 @@ describe("watchdog recovery lifecycle", () => {
     expect(events).toContain("recovery_succeeded");
   });
 
-  it("never restarts a slow but healthy agent (live pid, stale heartbeat)", async () => {
+  // tasklist-based liveness probing on Windows can be slow; allow ample time.
+  it("never restarts a slow but healthy agent (live pid, stale heartbeat)", { timeout: 30_000 }, async () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 15000)"], { stdio: "ignore" });
     try {
       const taskId = seedRunningTask(h, { pid: child.pid ?? null });
