@@ -1,0 +1,40 @@
+{
+  "name": "universal-agent-recovery",
+  "version": "0.1.0",
+  "description": "Universal Coding Agent Auto-Resume System: MCP server + independent recovery watchdog",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit",
+    "start:mcp": "node dist/mcp/server.js",
+    "start:watchdog": "node dist/watchdog/main.js",
+    "start:demo": "node dist/examples/demo.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo": "node dist/examples/demo.js"
+  },
+  "keywords": [
+    "mcp",
+    "coding-agent",
+    "recovery",
+    "watchdog",
+    "auto-resume"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.13.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}

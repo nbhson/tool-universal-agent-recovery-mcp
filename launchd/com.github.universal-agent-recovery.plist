@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.github.universal-agent-recovery.watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Absolute path to your Node.js binary -->
+        <string>/usr/local/bin/node</string>
+        <!-- Absolute path to the compiled watchdog entry point -->
+        <string>/absolute/path/to/universal-agent-recovery/dist/watchdog/main.js</string>
+    </array>
+
+    <!-- Edit to match your install location -->
+    <key>WorkingDirectory</key>
+    <string>/absolute/path/to/universal-agent-recovery</string>
+
+    <!-- Environment: create a .env file in the project directory or set vars here -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RECOVERY_DB_PATH</key>
+        <string>/absolute/path/to/universal-agent-recovery/data/recovery.db</string>
+        <key>RECOVERY_LOG_LEVEL</key>
+        <string>info</string>
+        <key>RECOVERY_LOG_FILE</key>
+        <string>/absolute/path/to/universal-agent-recovery/logs/watchdog.log</string>
+        <!-- Add RECOVERY_ALLOWED_DIRS, OPENCODE_BIN, etc. as needed -->
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Restart if the watchdog exits unexpectedly -->
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/absolute/path/to/universal-agent-recovery/logs/watchdog-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/absolute/path/to/universal-agent-recovery/logs/watchdog-stderr.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>
