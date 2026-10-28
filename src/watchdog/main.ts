@@ -21,7 +21,14 @@ async function main(): Promise<void> {
   const supervisor = new WatchdogSupervisor(config, registry, logger);
   await supervisor.start();
 
+  // Keep the Node.js event loop alive. The supervisor's internal tickTimer is
+  // unref'd so this process can also be used as a cron-style one-shot (via
+  // runOnce / tests). As a long-running daemon the entry point holds a live
+  // handle instead.
+  const keepAlive = setInterval(() => {}, 60_000);
+
   const shutdown = (): void => {
+    clearInterval(keepAlive);
     void supervisor.stop().then(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
