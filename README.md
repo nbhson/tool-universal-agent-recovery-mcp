@@ -1,6 +1,6 @@
 # Universal Agent Recovery
 
-[![CI](https://github.com/nbhson/universal-agent-recovery/actions/workflows/ci.yml/badge.svg)](https://github.com/nbhson/universal-agent-recovery/actions/workflows/ci.yml)
+[![CI](https://github.com/nbhson/tool-universal-agent-recovery-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/nbhson/tool-universal-agent-recovery-mcp/actions/workflows/ci.yml)
 
 **Your coding agent crashed at 80% of the task. Who restarts it?** This package does.
 

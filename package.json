@@ -5,13 +5,13 @@
   "type": "module",
   "license": "MIT",
   "author": "nbhson",
-  "homepage": "https://github.com/nbhson/universal-agent-recovery#readme",
+  "homepage": "https://github.com/nbhson/tool-universal-agent-recovery-mcp#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nbhson/universal-agent-recovery.git"
+    "url": "git+https://github.com/nbhson/tool-universal-agent-recovery-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/nbhson/universal-agent-recovery/issues"
+    "url": "https://github.com/nbhson/tool-universal-agent-recovery-mcp/issues"
   },
   "engines": {
     "node": ">=22.5.0"
