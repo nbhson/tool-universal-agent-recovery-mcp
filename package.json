@@ -1,6 +1,6 @@
 {
   "name": "s-universal-agent-recovery",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Universal Coding Agent Auto-Resume System: MCP server + independent watchdog that automatically resumes interrupted OpenCode / Claude Code / generic CLI agent tasks",
   "type": "module",
   "license": "MIT",
