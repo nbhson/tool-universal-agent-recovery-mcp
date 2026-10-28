@@ -1,6 +1,8 @@
 # Universal Agent Recovery
 
 [![CI](https://github.com/nbhson/tool-universal-agent-recovery-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/nbhson/tool-universal-agent-recovery-mcp/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/universal-agent-recovery.svg)](https://www.npmjs.com/package/universal-agent-recovery)
+[![npm downloads](https://img.shields.io/npm/dm/universal-agent-recovery.svg)](https://www.npmjs.com/package/universal-agent-recovery)
 
 **Your coding agent crashed at 80% of the task. Who restarts it?** This package does.
 
