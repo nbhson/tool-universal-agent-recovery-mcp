@@ -1,5 +1,7 @@
 /** Append-only event log for auditability and debugging. */
 import type { Database } from "./database.js";
+import type { Logger } from "../core/logger.js";
+import { safeJsonParse } from "./json.js";
 
 export type EventLevel = "info" | "warn" | "error";
 
@@ -14,7 +16,10 @@ export interface EventRecord {
 }
 
 export class EventRepository {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly logger?: Logger,
+  ) {}
 
   append(
     taskId: string,
@@ -40,7 +45,7 @@ export class EventRepository {
       type: String(r.type),
       level: String(r.level) as EventLevel,
       actor: String(r.actor),
-      data: r.data ? (JSON.parse(String(r.data)) as Record<string, unknown>) : null,
+      data: r.data ? safeJsonParse(String(r.data), `events:${String(r.id)}`, this.logger) : null,
       createdAt: Number(r.created_at),
     }));
   }

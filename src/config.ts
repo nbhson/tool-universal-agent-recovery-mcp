@@ -13,6 +13,8 @@ export interface RecoveryConfig {
   backoffMaxMs: number;
   ownerLeaseMs: number;
   pollIntervalMs: number;
+  /** Directory where the watchdog writes agent output logs during recovery. */
+  logDir: string;
   logLevel: "debug" | "info" | "warn" | "error";
   logFile: string | null;
 }
@@ -68,6 +70,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RecoveryConfig
     backoffMaxMs: intOf(env.RECOVERY_BACKOFF_MAX_MS, 1_800_000),
     ownerLeaseMs: intOf(env.RECOVERY_OWNER_LEASE_MS, 300_000),
     pollIntervalMs: intOf(env.RECOVERY_POLL_MS, 30_000),
+    // Agent output logs; relative by default (CWD-relative, as before).
+    logDir: env.UAR_LOG_DIR && env.UAR_LOG_DIR.trim() !== "" ? env.UAR_LOG_DIR : path.join("logs", "agent-output"),
     logLevel: (env.RECOVERY_LOG_LEVEL as "debug" | "info" | "warn" | "error" | undefined) ?? "info",
     logFile: env.RECOVERY_LOG_FILE || null,
   };

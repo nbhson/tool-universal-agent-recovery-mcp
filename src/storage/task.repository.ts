@@ -3,10 +3,12 @@ import type { Checkpoint, TaskInput, TaskRecord, TaskState } from "../core/task.
 import { applyTransition } from "../core/state-machine.js";
 import type { Database } from "./database.js";
 import type { EventRepository } from "./event.repository.js";
+import type { Logger } from "../core/logger.js";
+import { safeJsonParse, isUniqueConstraintError, DuplicateTaskError } from "./json.js";
 
 type Row = Record<string, unknown>;
 
-function rowToTask(r: Row): TaskRecord {
+function rowToTask(r: Row, logger?: Logger): TaskRecord {
   return {
     id: String(r.id),
     agentType: String(r.agent_type),
@@ -25,7 +27,7 @@ function rowToTask(r: Row): TaskRecord {
         : {
             summary: String(r.checkpoint_summary),
             details: r.checkpoint_details
-              ? (JSON.parse(String(r.checkpoint_details)) as Record<string, unknown>)
+              ? (safeJsonParse(String(r.checkpoint_details), `tasks:${String(r.id)}:checkpoint_details`, logger) ?? undefined)
               : undefined,
             verified: Number(r.checkpoint_verified) === 1,
           },
@@ -49,9 +51,21 @@ export class TaskRepository {
   constructor(
     private readonly db: Database,
     private readonly events: EventRepository,
+    private readonly logger?: Logger,
   ) {}
 
   create(input: TaskInput, now = Date.now()): TaskRecord {
+    try {
+      return this.createInternal(input, now);
+    } catch (err) {
+      // Register directly and translate the UNIQUE violation into a friendly
+      // domain error instead of leaking raw SQLite messages to MCP callers.
+      if (isUniqueConstraintError(err)) throw new DuplicateTaskError(input.taskId);
+      throw err;
+    }
+  }
+
+  private createInternal(input: TaskInput, now: number): TaskRecord {
     return this.db.transaction(() => {
       this.db.db
         .prepare(
@@ -84,7 +98,7 @@ export class TaskRepository {
 
   get(taskId: string): TaskRecord | null {
     const row = this.db.db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Row | undefined;
-    return row ? rowToTask(row) : null;
+    return row ? rowToTask(row, this.logger) : null;
   }
 
   private getOrThrow(taskId: string): TaskRecord {
@@ -99,7 +113,7 @@ export class TaskRepository {
     const rows = this.db.db
       .prepare(`SELECT * FROM tasks WHERE state IN (${placeholders})`)
       .all(...states) as Row[];
-    return rows.map(rowToTask);
+    return rows.map((r) => rowToTask(r, this.logger));
   }
 
   /**
@@ -111,49 +125,92 @@ export class TaskRepository {
     to: TaskState,
     extra?: { lastError?: string | null; errorClass?: string | null },
   ): TaskRecord {
-    return this.db.transaction(() => {
-      const row = this.db.db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Row | undefined;
-      if (!row) throw new Error(`Task ${taskId} not found`);
-      const current = String(row.state) as TaskState;
-      const now = Date.now();
-      const target = current === to ? to : applyTransition(taskId, current, to);
-      if (current === target && !extra) return rowToTask(row);
+    return this.db.transaction(() => this.transitionInternal(taskId, to, extra));
+  }
 
-      const sets: string[] = ["state = ?", "updated_at = ?"];
-      const params: Array<string | number | null> = [target, now];
-      if (extra?.lastError !== undefined) {
-        sets.push("last_error = ?");
-        params.push(extra.lastError);
-      }
-      if (extra?.errorClass !== undefined) {
-        sets.push("error_class = ?");
-        params.push(extra.errorClass);
-      }
-      if (target === "COMPLETED") {
-        sets.push("completed_at = ?");
-        params.push(now);
-      }
-      if (target === "CANCELLED") {
-        sets.push("cancelled_at = ?");
-        params.push(now);
-      }
-      if (target === "BLOCKED") {
-        sets.push("blocked_at = ?");
-        params.push(now);
-      }
-      if (target === "RUNNING") {
-        sets.push("recovery_owner = NULL", "recovery_owner_expires_at = NULL");
-      }
-      if (target === "INTERRUPTED") {
-        sets.push("interruption_detected_at = ?");
-        params.push(now);
-      }
-      params.push(taskId);
-      this.db.db
-        .prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`)
-        .run(...params);
+  private transitionInternal(
+    taskId: string,
+    to: TaskState,
+    extra?: { lastError?: string | null; errorClass?: string | null },
+  ): TaskRecord {
+    const row = this.db.db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Row | undefined;
+    if (!row) throw new Error(`Task ${taskId} not found`);
+    const current = String(row.state) as TaskState;
+    const now = Date.now();
+    const target = current === to ? to : applyTransition(taskId, current, to);
+    if (current === target && !extra) return rowToTask(row, this.logger);
+
+    const sets: string[] = ["state = ?", "updated_at = ?"];
+    const params: Array<string | number | null> = [target, now];
+    if (extra?.lastError !== undefined) {
+      sets.push("last_error = ?");
+      params.push(extra.lastError);
+    }
+    if (extra?.errorClass !== undefined) {
+      sets.push("error_class = ?");
+      params.push(extra.errorClass);
+    }
+    if (target === "COMPLETED") {
+      sets.push("completed_at = ?");
+      params.push(now);
+    }
+    if (target === "CANCELLED") {
+      sets.push("cancelled_at = ?");
+      params.push(now);
+    }
+    if (target === "BLOCKED") {
+      sets.push("blocked_at = ?");
+      params.push(now);
+    }
+    if (target === "RUNNING") {
+      sets.push("recovery_owner = NULL", "recovery_owner_expires_at = NULL");
+    }
+    if (target === "INTERRUPTED") {
+      sets.push("interruption_detected_at = ?");
+      params.push(now);
+    }
+    params.push(taskId);
+    this.db.db
+      .prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`)
+      .run(...params);
+    return this.getOrThrow(taskId);
+  }
+
+  /**
+   * Atomically record progress, transitioning REGISTERED -> RUNNING first
+   * when needed. A crash can no longer leave progress persisted without the
+   * RUNNING state (or the opposite). Returns the fresh task record.
+   */
+  transitionWithProgress(taskId: string, progress: string): TaskRecord {
+    return this.db.transaction(() => {
+      this.transitionIfRegistered(taskId);
+      this.setProgress(taskId, progress);
       return this.getOrThrow(taskId);
     });
+  }
+
+  /**
+   * Atomically save a checkpoint, transitioning REGISTERED -> RUNNING first
+   * when needed, so state, tasks row and checkpoint history stay consistent.
+   */
+  transitionWithCheckpoint(taskId: string, checkpoint: Checkpoint): TaskRecord {
+    return this.db.transaction(() => {
+      this.transitionIfRegistered(taskId);
+      this.setCheckpointInternal(taskId, checkpoint, Date.now());
+      return this.getOrThrow(taskId);
+    });
+  }
+
+  /** REGISTERED -> RUNNING side effect shared by progress/checkpoint writes. */
+  private transitionIfRegistered(taskId: string): void {
+    const row = this.db.db.prepare("SELECT state FROM tasks WHERE id = ?").get(taskId) as
+      | { state: string }
+      | undefined;
+    if (!row) throw new Error(`Task ${taskId} not found`);
+    if (String(row.state) === "REGISTERED") {
+      this.transitionInternal(taskId, "RUNNING");
+      this.events.append(taskId, "state_changed", "mcp", { to: "RUNNING" });
+    }
   }
 
   setProgress(taskId: string, progress: string, now = Date.now()): void {
@@ -181,33 +238,35 @@ export class TaskRepository {
   }
 
   setCheckpoint(taskId: string, checkpoint: Checkpoint, now = Date.now()): void {
-    this.db.transaction(() => {
-      this.db.db
-        .prepare(
-          `UPDATE tasks SET checkpoint_summary = ?, checkpoint_details = ?, checkpoint_verified = ?,
-             checkpoint_updated_at = ?, last_activity_at = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run(
-          checkpoint.summary,
-          checkpoint.details ? JSON.stringify(checkpoint.details) : null,
-          checkpoint.verified ? 1 : 0,
-          now,
-          now,
-          now,
-          taskId,
-        );
-      this.db.db
-        .prepare(
-          "INSERT INTO checkpoints (task_id, summary, details, verified, created_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run(
-          taskId,
-          checkpoint.summary,
-          checkpoint.details ? JSON.stringify(checkpoint.details) : null,
-          checkpoint.verified ? 1 : 0,
-          now,
-        );
-    });
+    this.db.transaction(() => this.setCheckpointInternal(taskId, checkpoint, now));
+  }
+
+  private setCheckpointInternal(taskId: string, checkpoint: Checkpoint, now: number): void {
+    this.db.db
+      .prepare(
+        `UPDATE tasks SET checkpoint_summary = ?, checkpoint_details = ?, checkpoint_verified = ?,
+           checkpoint_updated_at = ?, last_activity_at = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(
+        checkpoint.summary,
+        checkpoint.details ? JSON.stringify(checkpoint.details) : null,
+        checkpoint.verified ? 1 : 0,
+        now,
+        now,
+        now,
+        taskId,
+      );
+    this.db.db
+      .prepare(
+        "INSERT INTO checkpoints (task_id, summary, details, verified, created_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        taskId,
+        checkpoint.summary,
+        checkpoint.details ? JSON.stringify(checkpoint.details) : null,
+        checkpoint.verified ? 1 : 0,
+        now,
+      );
   }
 
   // --- recovery ownership: single active owner per task ---

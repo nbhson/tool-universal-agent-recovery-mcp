@@ -18,6 +18,7 @@ import { normalizeWorkingDirectory, assertAllowedDirectory } from "../config.js"
 import type { Logger } from "../core/logger.js";
 import type { TaskRecord } from "../core/task.js";
 import { classifyError } from "../core/error-classifier.js";
+import { DuplicateTaskError } from "../storage/json.js";
 
 export interface ServerContext {
   db: Database;
@@ -88,9 +89,8 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
       try {
         const workingDirectory = normalizeWorkingDirectory(input.workingDirectory);
         assertAllowedDirectory(workingDirectory, ctx.config.allowedDirs);
-        if (ctx.tasks.get(input.taskId)) {
-          return fail(`Task '${input.taskId}' already registered`);
-        }
+        // Insert directly; a UNIQUE violation is translated into a friendly
+        // error (including the current task state) instead of raw SQLite output.
         const task = tasks.create({
           taskId: input.taskId,
           adapterId: input.adapterId,
@@ -104,6 +104,10 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
         events.append(input.taskId, "registered", "mcp", { adapterId: input.adapterId });
         return ok({ task: taskSummary(task) });
       } catch (err) {
+        if (err instanceof DuplicateTaskError) {
+          const existing = ctx.tasks.get(input.taskId);
+          return fail(`Task '${input.taskId}' already exists (state: ${existing?.state ?? "UNKNOWN"})`);
+        }
         return fail(err instanceof Error ? err.message : String(err));
       }
     },
@@ -126,11 +130,10 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
       if (task.state === "COMPLETED" || task.state === "CANCELLED") {
         return fail(`Task '${taskId}' is ${task.state}; cannot report progress`);
       }
-      if (task.state === "REGISTERED") {
-        tasks.transition(taskId, "RUNNING");
-        events.append(taskId, "state_changed", "mcp", { to: "RUNNING" });
-      }
-      tasks.setProgress(taskId, progress);
+      // progress + (REGISTERED -> RUNNING when applicable) in one atomic transaction
+      const updated = tasks.transitionWithProgress(taskId, progress);
+      events.append(taskId, "progress", "agent", { progress: progress.slice(0, 500) });
+      return ok({ taskId, state: updated.state });
       events.append(taskId, "progress", "agent", { progress: progress.slice(0, 500) });
       return ok({ taskId, state: ctx.tasks.get(taskId)!.state });
     },
@@ -161,8 +164,14 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
         return fail(`Task '${taskId}' is ${task.state}; cannot save checkpoint`);
       }
       if (task.state === "REGISTERED") {
-        tasks.transition(taskId, "RUNNING");
-        events.append(taskId, "state_changed", "mcp", { to: "RUNNING" });
+        // checkpoint + RUNNING transition in one atomic transaction
+        tasks.transitionWithCheckpoint(taskId, {
+          summary,
+          details: details as Record<string, unknown> | undefined,
+          verified: verified ?? false,
+        });
+        events.append(taskId, "checkpoint_saved", "agent", { summary: summary.slice(0, 500), verified: verified ?? false });
+        return ok({ taskId, checkpointSaved: true });
       }
       tasks.setCheckpoint(taskId, {
         summary,
@@ -320,8 +329,8 @@ export async function runMcpServer(
 ): Promise<void> {
   const db = new Database(config.dbPath, logger);
   db.migrate();
-  const events = new EventRepository(db);
-  const tasks = new TaskRepository(db, events);
+  const events = new EventRepository(db, logger);
+  const tasks = new TaskRepository(db, events, logger);
   const ctx: ServerContext = { db, tasks, events, config, logger };
 
   const server = buildMcpServer(ctx);

@@ -28,6 +28,8 @@ export class WatchdogSupervisor {
   private readonly instanceId: string;
   private tickTimer: NodeJS.Timeout | null = null;
   private stopping = false;
+  /** Re-entrancy guard: overlapping interval ticks are skipped, not queued. */
+  private ticking = false;
   private readonly running = new Map<string, { attemptId: number; startedAt: number; cancel: () => void }>();
   private readonly db: Database;
   private readonly tasks: TaskRepository;
@@ -42,8 +44,8 @@ export class WatchdogSupervisor {
   ) {
     this.db = new Database(config.dbPath, logger);
     this.db.migrate();
-    this.events = new EventRepository(this.db);
-    this.tasks = new TaskRepository(this.db, this.events);
+    this.events = new EventRepository(this.db, logger);
+    this.tasks = new TaskRepository(this.db, this.events, logger);
     this.attempts = new RecoveryAttemptRepository(this.db);
     this.lock = new LeaderLock(this.db);
     this.instanceId = `wd-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
@@ -66,7 +68,7 @@ export class WatchdogSupervisor {
       this.logger.warn("recovery disabled via RECOVERY_ENABLED=false — monitoring only, no recovery");
     }
 
-    this.tickTimer = setInterval(() => void this.tick(), this.config.pollIntervalMs);
+    this.tickTimer = setInterval(() => void this.tickGuarded(), this.config.pollIntervalMs);
     this.tickTimer.unref();
     await this.tick();
   }
@@ -98,6 +100,24 @@ export class WatchdogSupervisor {
   }
 
   // --- main loop ---
+
+  /**
+   * Interval-scheduled tick with a re-entrancy guard: if the previous tick is
+   * still running (e.g. a slow recovery), overlapping ticks are skipped rather
+   * than queued, so work never piles up behind a stalled loop.
+   */
+  private async tickGuarded(): Promise<void> {
+    if (this.ticking) {
+      this.logger.debug("tick skipped: previous tick still running");
+      return;
+    }
+    this.ticking = true;
+    try {
+      await this.tick();
+    } finally {
+      this.ticking = false;
+    }
+  }
 
   private async tick(): Promise<void> {
     if (this.stopping) return;
@@ -241,7 +261,7 @@ export class WatchdogSupervisor {
 
     const adapter = this.registry.get(task.adapterId);
     const instruction = buildRecoveryInstruction(task, task.checkpoint);
-    const logDir = path.join("logs", "agent-output");
+    const logDir = this.config.logDir;
     const logFile = path.join(logDir, `${taskId}-attempt${task.recoveryAttempts + 1}.log`);
     const maxRuntime = task.maxRecoveryDurationMs ?? this.config.maxRuntimeMs;
     const startedAt = Date.now();
