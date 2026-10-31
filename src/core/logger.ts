@@ -28,7 +28,7 @@ export function redactValue(value: unknown, depth = 0): unknown {
   if (typeof value === "string") {
     // Redact anything that looks like a bearer token or key assignment.
     return value
-      .replace(/(Bearer|sk-|ghp_|github_pat_)[A-Za-z0-9._-]+/gi, "[REDACTED]")
+      .replace(/(Bearer\s+|sk-|ghp_|github_pat_)[A-Za-z0-9._-]+/gi, "[REDACTED]")
       .replace(/(authorization\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
   }
   if (Array.isArray(value)) return value.map((v) => redactValue(v, depth + 1));

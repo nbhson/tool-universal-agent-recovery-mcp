@@ -51,6 +51,13 @@ export function assertAllowedDirectory(dir: string, allowedDirs: string[]): void
   }
 }
 
+const LOG_LEVELS = new Set(["debug", "info", "warn", "error"]);
+
+function logLevelOf(v: string | undefined): RecoveryConfig["logLevel"] {
+  const level = (v ?? "").trim().toLowerCase();
+  return LOG_LEVELS.has(level) ? (level as RecoveryConfig["logLevel"]) : "info";
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RecoveryConfig {
   const allowedDirs = (env.RECOVERY_ALLOWED_DIRS ?? "")
     .split(/[,;]/)
@@ -72,7 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RecoveryConfig
     pollIntervalMs: intOf(env.RECOVERY_POLL_MS, 30_000),
     // Agent output logs; relative by default (CWD-relative, as before).
     logDir: env.UAR_LOG_DIR && env.UAR_LOG_DIR.trim() !== "" ? env.UAR_LOG_DIR : path.join("logs", "agent-output"),
-    logLevel: (env.RECOVERY_LOG_LEVEL as "debug" | "info" | "warn" | "error" | undefined) ?? "info",
+    logLevel: logLevelOf(env.RECOVERY_LOG_LEVEL),
     logFile: env.RECOVERY_LOG_FILE || null,
   };
 }
