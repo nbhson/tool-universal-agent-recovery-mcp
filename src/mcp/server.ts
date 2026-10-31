@@ -30,6 +30,9 @@ export interface ServerContext {
 
 const TASK_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/** Server implementation version reported via MCP initialize (kept in sync with package.json). */
+export const MCP_SERVER_VERSION = "0.2.1";
+
 function fail(message: string, extra?: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: message, ...extra }) }], isError: true };
 }
@@ -134,8 +137,6 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
       const updated = tasks.transitionWithProgress(taskId, progress);
       events.append(taskId, "progress", "agent", { progress: progress.slice(0, 500) });
       return ok({ taskId, state: updated.state });
-      events.append(taskId, "progress", "agent", { progress: progress.slice(0, 500) });
-      return ok({ taskId, state: ctx.tasks.get(taskId)!.state });
     },
   );
 
@@ -203,7 +204,16 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
         return fail(`Task '${taskId}' is ${task.state}; interruption ignored`);
       }
       const classified = classifyError(error, exitCode ?? null);
-      tasks.transition(taskId, "INTERRUPTED", { lastError: error, errorClass: classified.cls });
+      // BLOCKED tasks cannot legally move to INTERRUPTED; reject with a
+      // friendly message instead of leaking an IllegalTransitionError.
+      try {
+        tasks.transition(taskId, "INTERRUPTED", { lastError: error, errorClass: classified.cls });
+      } catch (err) {
+        return fail(
+          `Task '${taskId}' is ${task.state}; interruption not accepted: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
       tasks.markInterruptionDetected(taskId, Date.now());
       events.append(
         taskId,
@@ -317,7 +327,7 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
 }
 
 export function buildMcpServer(ctx: ServerContext): McpServer {
-  const server = new McpServer({ name: "recovery-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "recovery-mcp", version: MCP_SERVER_VERSION });
   registerTools(server, ctx);
   return server;
 }
