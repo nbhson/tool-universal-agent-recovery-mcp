@@ -47,7 +47,7 @@ export class WatchdogSupervisor {
     this.events = new EventRepository(this.db, logger);
     this.tasks = new TaskRepository(this.db, this.events, logger);
     this.attempts = new RecoveryAttemptRepository(this.db);
-    this.lock = new LeaderLock(this.db);
+    this.lock = new LeaderLock(this.db, logger);
     this.instanceId = `wd-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
   }
 
@@ -413,13 +413,26 @@ export class WatchdogSupervisor {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error("recovery error", { taskId, error: message });
       this.attempts.finish(attemptId, "failed", message.slice(0, 500));
-      this.tasks.incrementRecoveryAttempts(taskId);
+      const attemptNo = this.tasks.incrementRecoveryAttempts(taskId);
+      // Mirror the failure path: apply backoff so a persistently throwing
+      // launch cannot hot-loop, and block the task when the budget is spent.
+      const backoff = computeBackoff(attemptNo, this.config);
+      this.tasks.scheduleNextRecovery(taskId, Date.now() + backoff);
       try {
         this.tasks.transition(taskId, "INTERRUPTED", { lastError: message });
       } catch {
         /* state already moved */
       }
       this.events.append(taskId, "recovery_failed", "watchdog", { error: message }, "error");
+      if (attemptNo >= task.maxAttempts) {
+        try {
+          this.tasks.transition(taskId, "BLOCKED");
+          this.events.append(taskId, "blocked", "watchdog", { reason: "retry budget exhausted", attempts: attemptNo }, "error");
+          this.logger.warn("task blocked", { taskId, attempts: attemptNo });
+        } catch {
+          /* transition not legal from current state; skip */
+        }
+      }
     } finally {
       clearInterval(leaseTimer);
       this.tasks.releaseRecoveryOwner(taskId, this.instanceId);
