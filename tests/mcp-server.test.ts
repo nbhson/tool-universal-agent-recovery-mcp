@@ -164,4 +164,34 @@ describe("mcp tools", () => {
     const res = await call(h.client, "get_task_status", { taskId: "nope" });
     expect(res.ok).toBe(false);
   });
+
+  it("10. report_interruption on a BLOCKED task returns a friendly error", async () => {
+    const wd = WIN ? "C:\\work\\proj" : "/work/proj";
+    await call(h.client, "register_task", { taskId: "blk", adapterId: "opencode", workingDirectory: wd, description: "x" });
+    await call(h.client, "report_progress", { taskId: "blk", progress: "started" });
+    // Force the task into BLOCKED (as the watchdog would after exhausting retries).
+    h.tasks.transition("blk", "INTERRUPTED", { lastError: "boom" });
+    h.tasks.transition("blk", "BLOCKED");
+    // BLOCKED -> INTERRUPTED is illegal: must surface as ok:false, not a crash.
+    const res = await call(h.client, "report_interruption", { taskId: "blk", error: "still failing" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/BLOCKED/i);
+    expect(h.tasks.get("blk")?.state).toBe("BLOCKED");
+  });
+
+  it("11. cancel_task is idempotent and completed tasks cannot be cancelled", async () => {
+    const wd = WIN ? "C:\\work\\proj" : "/work/proj";
+    await call(h.client, "register_task", { taskId: "c2", adapterId: "opencode", workingDirectory: wd, description: "x" });
+    const first = await call(h.client, "cancel_task", { taskId: "c2", reason: "no longer needed" });
+    expect(first.ok).toBe(true);
+    const again = await call(h.client, "cancel_task", { taskId: "c2" });
+    expect(again.ok).toBe(true);
+    expect((again as { note?: string }).note).toMatch(/already cancelled/i);
+    // A completed task refuses cancellation.
+    await call(h.client, "register_task", { taskId: "c3", adapterId: "opencode", workingDirectory: wd, description: "x" });
+    await call(h.client, "report_progress", { taskId: "c3", progress: "work" });
+    await call(h.client, "mark_completed", { taskId: "c3", verification: "verified" });
+    const done = await call(h.client, "cancel_task", { taskId: "c3" });
+    expect(done.ok).toBe(false);
+  });
 });

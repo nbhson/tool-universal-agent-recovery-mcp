@@ -19,6 +19,7 @@ import { RecoveryAttemptRepository } from "../src/storage/recovery-attempt.repos
 import { LeaderLock } from "../src/storage/leader-lock.js";
 import { AdapterRegistry } from "../src/adapters/registry.js";
 import { MockAdapter } from "../src/adapters/mock.adapter.js";
+import type { AdapterCapabilities, AgentAdapter, LaunchResult } from "../src/adapters/adapter.interface.js";
 import { WatchdogSupervisor } from "../src/watchdog/supervisor.js";
 import { createLogger } from "../src/core/logger.js";
 import { loadConfig, type RecoveryConfig } from "../src/config.js";
@@ -325,6 +326,94 @@ describe("watchdog recovery lifecycle", () => {
 function backdateTask(h: Harness, taskId: string, msAgo: number): void {
   h.db.db.prepare("UPDATE tasks SET last_activity_at = ? WHERE id = ?").run(Date.now() - msAgo, taskId);
 }
+
+/** Adapter whose every launch throws — simulates a broken binary / spawn failure. */
+class ThrowingAdapter implements AgentAdapter {
+  readonly id = "mock";
+  readonly agentType = "mock";
+  readonly capabilities: AdapterCapabilities = {
+    detect: true,
+    inspectSession: false,
+    resumeSession: true,
+    launchNew: true,
+    restoreContext: false,
+    processHealth: true,
+    gracefulCancel: false,
+    completionDetection: false,
+  };
+  launchCalls = 0;
+  async detect(): Promise<boolean> {
+    return true;
+  }
+  async resumeSession(): Promise<LaunchResult> {
+    this.launchCalls += 1;
+    throw new Error("simulated spawn failure");
+  }
+  async startNewSession(): Promise<LaunchResult> {
+    this.launchCalls += 1;
+    throw new Error("simulated spawn failure");
+  }
+}
+
+describe("watchdog launch-exception handling", () => {
+  it("applies backoff between failed launches and blocks after exhausting the budget", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "uar-throw-"));
+    const dbPath = path.join(dir, "test.db");
+    const config = testConfig({ RECOVERY_MAX_ATTEMPTS: "2", RECOVERY_BACKOFF_BASE_MS: "5000", RECOVERY_BACKOFF_MAX_MS: "5000" }, dbPath);
+    const registry = new AdapterRegistry();
+    const throwing = new ThrowingAdapter();
+    registry.register(throwing);
+    const logger = createLogger({ level: "error" });
+    const supervisor = new WatchdogSupervisor(config, registry, logger);
+
+    const db = new Database(dbPath);
+    db.migrate();
+    const events = new EventRepository(db);
+    const tasks = new TaskRepository(db, events);
+
+    try {
+      const task = tasks.create({
+        taskId: "throw-1",
+        agentType: "mock",
+        adapterId: "mock",
+        sessionId: "sess-x",
+        workingDirectory: WD,
+        description: "d",
+        maxAttempts: 2,
+      });
+      tasks.transition(task.id, "RUNNING");
+      tasks.setProgress(task.id, "work");
+      db.db.prepare("UPDATE tasks SET last_activity_at = ? WHERE id = ?").run(Date.now() - 5_000, task.id);
+
+      await supervisor.runOnce(); // attempt 1 throws -> INTERRUPTED + backoff scheduled
+      const afterFirst = tasks.get(task.id);
+      expect(afterFirst?.state).toBe("INTERRUPTED");
+      expect(afterFirst?.recoveryAttempts).toBe(1);
+      expect(afterFirst?.nextRecoveryAt ?? 0).toBeGreaterThan(Date.now() - 1); // backoff applied
+      expect(throwing.launchCalls).toBe(2); // resume + new-session fallback both threw
+
+      // Second launch must wait for the backoff window.
+      await supervisor.runOnce();
+      expect(throwing.launchCalls).toBe(2);
+      expect(tasks.get(task.id)?.recoveryAttempts).toBe(1);
+
+      // Backdate the cooldown, then retry: attempt 2 throws -> budget exhausted -> BLOCKED.
+      db.db.prepare("UPDATE tasks SET next_recovery_at = ? WHERE id = ?").run(Date.now() - 1, task.id);
+      await supervisor.runOnce();
+      const afterSecond = tasks.get(task.id);
+      expect(afterSecond?.state).toBe("BLOCKED");
+      expect(afterSecond?.recoveryAttempts).toBe(2);
+    } finally {
+      await supervisor.stop();
+      db.close();
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+  });
+});
 
 describe("mock adapter resumeThrows extension", () => {
   it("supports scripted launch-time failures", async () => {
