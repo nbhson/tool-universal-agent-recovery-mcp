@@ -1,12 +1,12 @@
 # Universal Agent Recovery
 
 [![CI](https://github.com/nbhson/tool-universal-agent-recovery-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/nbhson/tool-universal-agent-recovery-mcp/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/universal-agent-recovery.svg)](https://www.npmjs.com/package/universal-agent-recovery)
-[![npm downloads](https://img.shields.io/npm/dm/universal-agent-recovery.svg)](https://www.npmjs.com/package/universal-agent-recovery)
+[![npm version](https://img.shields.io/npm/v/s-universal-agent-recovery.svg)](https://www.npmjs.com/package/s-universal-agent-recovery)
+[![npm downloads](https://img.shields.io/npm/dm/s-universal-agent-recovery.svg)](https://www.npmjs.com/package/s-universal-agent-recovery)
 
 **Your coding agent crashed at 80% of the task. Who restarts it?** This package does.
 
-`universal-agent-recovery` is an **MCP server + independent watchdog** that automatically detects when a coding agent task is interrupted (crash, timeout, lost session) and resumes it — from the same session when possible, or from a saved checkpoint otherwise.
+`universal-agent-recovery` is an **MCP server + independent watchdog** (npm package: `s-universal-agent-recovery`) that automatically detects when a coding agent task is interrupted (crash, timeout, lost session) and resumes it — from the same session when possible, or from a saved checkpoint otherwise.
 
 ```
 Agent doing work ── crash ──> watchdog detects ──> resumes from checkpoint
@@ -30,7 +30,7 @@ Agent doing work ── crash ──> watchdog detects ──> resumes from chec
 ## Quick start
 
 ```bash
-npm install -g universal-agent-recovery
+npm install -g s-universal-agent-recovery
 ```
 
 ### 1. Register the MCP server in your MCP client
@@ -246,7 +246,7 @@ setx OPENCODE_BIN "C:\path\to\nodejs\node_modules\@opencode\cli\bin\opencode.exe
 npm install
 npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
-npm test            # 78 unit + integration tests
+npm test            # unit + integration tests
 npm run build       # compile to dist/
 ```
 
