@@ -35,6 +35,41 @@ describe("LeaderLock", () => {
     db.close();
   });
 
+  it("cannot renew after another instance took over the expired lease", () => {
+    const db = new Database(":memory:");
+    db.migrate();
+    const lock = new LeaderLock(db);
+    expect(lock.tryAcquire("wd-a", 10, 0)).toBe(true); // expires at 10
+    expect(lock.tryAcquire("wd-b", 60_000, 11)).toBe(true); // wd-b takes over
+    // wd-a's late renewal must NOT steal the lease back.
+    expect(lock.renew("wd-a", 60_000, 12)).toBe(false);
+    expect(lock.renew("wd-b", 60_000, 12)).toBe(true);
+    db.close();
+  });
+
+  it("renew reports false on a corrupt value and lets tryAcquire heal it", () => {
+    const db = new Database(":memory:");
+    db.migrate();
+    db.db.prepare("INSERT INTO meta (key, value) VALUES ('watchdog_lock', 'not-json')").run();
+    const lock = new LeaderLock(db);
+    expect(lock.renew("wd-a", 60_000, 0)).toBe(false);
+    // tryAcquire resets the poisoned row and acquires.
+    expect(lock.tryAcquire("wd-a", 60_000, 0)).toBe(true);
+    expect(lock.renew("wd-a", 60_000, 1)).toBe(true);
+    db.close();
+  });
+
+  it("release on a corrupt value neither throws nor deletes other owners' locks", () => {
+    const db = new Database(":memory:");
+    db.migrate();
+    db.db.prepare("INSERT INTO meta (key, value) VALUES ('watchdog_lock', 'not-json')").run();
+    const lock = new LeaderLock(db);
+    expect(() => lock.release("wd-a")).not.toThrow();
+    const row = db.db.prepare("SELECT value FROM meta WHERE key = 'watchdog_lock'").get() as { value: string };
+    expect(row.value).toBe("not-json"); // untouched; tryAcquire heals it later
+    db.close();
+  });
+
   it("releasing a foreign owner leaves the lock intact", () => {
     const db = new Database(":memory:");
     db.migrate();

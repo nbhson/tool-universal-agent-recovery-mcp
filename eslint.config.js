@@ -22,4 +22,16 @@ export default tseslint.config(
       "@typescript-eslint/no-non-null-assertion": "off",
     },
   },
+  {
+    // Plain-JS fixtures run as child processes (no TypeScript tooling needed).
+    files: ["tests/fixtures/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        setTimeout: "readonly",
+        URL: "readonly",
+        console: "readonly",
+      },
+    },
+  },
 );

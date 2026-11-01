@@ -40,35 +40,38 @@ export class LeaderLock {
     return Number(res.changes) === 1;
   }
 
+  /**
+   * Renew only while still owning the lease, in one atomic statement.
+   * A read-then-write implementation would race with another process
+   * acquiring the expired lease in between and overwriting its lock.
+   */
   renew(instanceId: string, leaseMs: number, now = Date.now()): boolean {
-    const row = this.db.db.prepare("SELECT value FROM meta WHERE key = 'watchdog_lock'").get() as
-      | { value: string }
-      | undefined;
-    if (!row) return false;
     try {
-      const lock = JSON.parse(row.value) as { instanceId: string; expiresAt: number };
-      if (lock.instanceId !== instanceId) return false;
-      this.db.db
-        .prepare("UPDATE meta SET value = ? WHERE key = 'watchdog_lock'")
-        .run(JSON.stringify({ instanceId, expiresAt: now + leaseMs }));
-      return true;
+      const res = this.db.db
+        .prepare(
+          `UPDATE meta SET value = ? WHERE key = 'watchdog_lock'
+           AND json_extract(value, '$.instanceId') = ?`,
+        )
+        .run(JSON.stringify({ instanceId, expiresAt: now + leaseMs }), instanceId);
+      return Number(res.changes) === 1;
     } catch {
+      // Corrupt value: json_extract throws and we cannot prove ownership.
+      // Return false so the caller re-runs tryAcquire (which self-heals the row).
       return false;
     }
   }
 
+  /** Release only when still owning the lease (atomic; foreign/corrupt locks untouched). */
   release(instanceId: string): void {
-    const row = this.db.db.prepare("SELECT value FROM meta WHERE key = 'watchdog_lock'").get() as
-      | { value: string }
-      | undefined;
-    if (!row) return;
     try {
-      const lock = JSON.parse(row.value) as { instanceId: string };
-      if (lock.instanceId === instanceId) {
-        this.db.db.prepare("DELETE FROM meta WHERE key = 'watchdog_lock'").run();
-      }
+      this.db.db
+        .prepare(
+          `DELETE FROM meta WHERE key = 'watchdog_lock'
+           AND json_extract(value, '$.instanceId') = ?`,
+        )
+        .run(instanceId);
     } catch {
-      /* ignore */
+      /* corrupt value: leave it to tryAcquire's self-healing reset */
     }
   }
 }
