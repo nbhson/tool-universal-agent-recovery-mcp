@@ -29,7 +29,8 @@
   ],
   "bin": {
     "uar-mcp": "bin/uar-mcp.js",
-    "uar-watchdog": "bin/uar-watchdog.js"
+    "uar-watchdog": "bin/uar-watchdog.js",
+    "uar-state": "bin/uar-state.js"
   },
   "files": [
     "bin",
@@ -45,6 +46,7 @@
     "start:mcp": "node dist/mcp/main.js",
     "start:watchdog": "node dist/watchdog/main.js",
     "start:demo": "node dist/examples/demo.js",
+    "dump": "node dist/cli/dump-state.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "node dist/examples/demo.js",
