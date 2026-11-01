@@ -22,8 +22,13 @@ Agent doing work ── crash ──> watchdog detects ──> resumes from chec
 | **Watchdog** | `uar-watchdog` | Independent process that detects interruptions and launches recovery |
 
 - Works with **OpenCode**, **Claude Code**, and any agent via a **generic CLI** template adapter.
-- **No native dependencies** — uses Node's built-in SQLite (`node >= 22.5`).
+- **No native dependencies** — uses Node's built-in SQLite (`node >= 22.5`, 22.x only).
 - The watchdog never depends on the agent being alive to perform recovery.
+
+> **Node version**: this package targets **Node.js 22.x** (`>=22.5.0 <23`) because storage uses
+> the built-in `node:sqlite` module, whose behavior can change between major lines. Node 23+/24+
+> may work but is untested; the `(node:xxx) ExperimentalWarning: SQLite is an experimental feature`
+> message at startup is expected and harmless.
 
 ---
 

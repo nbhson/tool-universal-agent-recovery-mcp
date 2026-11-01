@@ -14,7 +14,7 @@
     "url": "https://github.com/nbhson/tool-universal-agent-recovery-mcp/issues"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.5.0 <23"
   },
   "keywords": [
     "mcp",
