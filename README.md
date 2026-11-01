@@ -303,8 +303,14 @@ npm install
 npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
 npm test            # unit + integration tests
+npm run test:coverage  # same tests + V8 coverage report
 npm run build       # compile to dist/
 ```
+
+Current coverage (V8): ~76% statements / ~71% branches overall; storage core
+(`src/storage`) at ~90% statements. The thinner areas are the adapter binaries'
+process plumbing (covered mainly by integration tests) and the `uar-state` CLI
+(covered at the `dumpState` function level).
 
 Integration tests against a real OpenCode binary run automatically when the binary exists; the live end-to-end test (needs provider credentials) is opt-in:
 
