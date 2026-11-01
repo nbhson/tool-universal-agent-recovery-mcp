@@ -20,6 +20,7 @@ Agent doing work ── crash ──> watchdog detects ──> resumes from chec
 |-----------|-----|------|
 | **MCP Server** | `uar-mcp` | Tools for the agent to register tasks, report progress, save checkpoints |
 | **Watchdog** | `uar-watchdog` | Independent process that detects interruptions and launches recovery |
+| **State dump** | `uar-state` | Read-only JSON snapshot of tasks/leases/retries for debugging |
 
 - Works with **OpenCode**, **Claude Code**, and any agent via a **generic CLI** template adapter.
 - **No native dependencies** — uses Node's built-in SQLite (`node >= 22.5`, 22.x only).
@@ -226,6 +227,56 @@ setx OPENCODE_BIN "C:\path\to\nodejs\node_modules\@opencode\cli\bin\opencode.exe
 | Slow agents restarted | `RECOVERY_STALE_MS` too short | Increase it (default 10 min) |
 | `ENOENT` spawning the agent | Binary not resolvable | Set `OPENCODE_BIN` / `CLAUDE_CODE_BIN` to an absolute `.exe` path |
 
+### "SQLite database is locked"
+
+Another `uar-mcp` / `uar-watchdog` process holds a long write transaction, or the database
+lives on a network filesystem (NFS/SMB — WAL mode requires local disk). Steps:
+
+1. Check for stale processes: `ps aux | grep uar-` and kill leftovers.
+2. Inspect the current state read-only: `uar-state` (shows tasks, lease holders, retry counts).
+3. Confirm both processes point at the **same** `RECOVERY_DB_PATH`.
+4. Move `RECOVERY_DB_PATH` to a local disk if it is on a network mount.
+
+### "Task 'X' already exists (state: ...)"
+
+Task IDs are unique forever, including terminal states (`COMPLETED`/`CANCELLED`/`BLOCKED`).
+Use a new ID for a fresh run, or call `cancel_task`/`mark_completed` on the existing one.
+
+### "Task is BLOCKED; interruption not accepted"
+
+The task exhausted its retry budget (`maxAttempts`, default 5) or failed with a
+non-recoverable error class. Inspect `lastError` / recent events:
+
+```bash
+uar-state --task <taskId>        # includes the last 50 events
+```
+
+Then either fix the underlying problem and register a new task, or cancel it.
+There is currently no "unblock" tool — re-registering is intentional friction.
+
+### "outside the configured allowed directories"
+
+`RECOVERY_ALLOWED_DIRS` is set and the task's working directory is outside every root.
+Add the project root to the comma-separated list (both `uar-mcp` and `uar-watchdog`
+must see the same value).
+
+### Config warnings at startup
+
+Invalid numeric env values (e.g. `RECOVERY_MAX_ATTEMPTS=-3`) and unknown log levels are
+replaced by defaults with a `configuration warning` log line at startup — check the logs
+if behavior doesn't match what you configured.
+
+### Debugging snapshot
+
+```bash
+uar-state                          # pretty JSON of everything
+uar-state --db ./data/recovery.db  # explicit database path
+uar-state --task my-task           # single task + last 50 events
+uar-state --compact | jq '.tasksByState'
+```
+
+The dump is read-only and safe to run while the MCP server and watchdog are live.
+
 ## Known limitations
 
 - **Claude Code session inspection**: no documented non-interactive command to list sessions; an invalid session id falls back to a new session.
@@ -265,13 +316,14 @@ UAR_INTEGRATION=1 npm test
 
 ```
 universal-agent-recovery/
-├── bin/                 # CLI shims: uar-mcp, uar-watchdog
+├── bin/                 # CLI shims: uar-mcp, uar-watchdog, uar-state
 ├── src/
 │   ├── core/            # Types, state machine, error classifier, logger
 │   ├── storage/         # SQLite, task/event/attempt repositories, leader lock
 │   ├── adapters/        # OpenCode, Claude Code, Generic CLI, Mock (testing)
 │   ├── mcp/             # MCP server (7 tools, stdio transport) + entry point
 │   ├── watchdog/        # Supervisor, monitor, recovery policy, instructions
+│   ├── cli/             # uar-state: read-only JSON state dump for debugging
 │   └── examples/        # Demo script
 ├── docs/                # Design documents
 ├── tests/               # Unit + integration tests
