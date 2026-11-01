@@ -89,4 +89,25 @@ describe("createLogger", () => {
     }
     expect(writes[0]).toContain("parent:child");
   });
+
+  it("silent mode discards every level, including children", () => {
+    const logger = createLogger({ level: "debug", silent: true });
+    const child = logger.child("quiet");
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      logger.debug("d");
+      logger.info("i");
+      logger.warn("w");
+      logger.error("e");
+      child.error("from child");
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(writes).toHaveLength(0);
+  });
 });

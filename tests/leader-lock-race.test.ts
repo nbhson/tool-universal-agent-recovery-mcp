@@ -29,7 +29,9 @@ interface Claim {
 
 /** Overlapping unexpired leases held by different workers = mutual-exclusion violation. */
 function findOverlaps(claims: Claim[]): Array<[Claim, Claim]> {
-  const sorted = [...claims].sort((a, b) => a.claimed_at - b.claimed_at);
+  // Zero-length claims (claimed and released within the same millisecond)
+  // never actually held the lock — exclude them.
+  const sorted = claims.filter((c) => c.expires_at > c.claimed_at).sort((a, b) => a.claimed_at - b.claimed_at);
   const overlaps: Array<[Claim, Claim]> = [];
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {

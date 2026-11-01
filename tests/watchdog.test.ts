@@ -67,7 +67,9 @@ function makeHarness(env: Record<string, string> = {}): Harness {
   const registry = new AdapterRegistry();
   const mock = new MockAdapter();
   registry.register(mock);
-  const logger = createLogger({ level: process.env.UAR_TEST_LOG_LEVEL as "debug" | "error" || "error" });
+  // Silent logger: the exception-path tests below intentionally log errors
+  // (simulated spawn failures); silence keeps the vitest output clean.
+  const logger = createLogger({ level: process.env.UAR_TEST_LOG_LEVEL as "debug" | "error" || "error", silent: true });
   const supervisor = new WatchdogSupervisor(config, registry, logger);
 
   const db = new Database(dbPath);
@@ -363,7 +365,7 @@ describe("watchdog launch-exception handling", () => {
     const registry = new AdapterRegistry();
     const throwing = new ThrowingAdapter();
     registry.register(throwing);
-    const logger = createLogger({ level: "error" });
+    const logger = createLogger({ level: "error", silent: true });
     const supervisor = new WatchdogSupervisor(config, registry, logger);
 
     const db = new Database(dbPath);

@@ -55,6 +55,8 @@ export interface LoggerOptions {
   level?: LogLevel;
   logFile?: string | null;
   component?: string;
+  /** Discard all output (unit tests, exception paths that expect errors). */
+  silent?: boolean;
 }
 
 function writeLine(line: string, logFile: string | null): void {
@@ -75,6 +77,21 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   const level = opts.level ?? "info";
   const logFile = opts.logFile ?? null;
   const component = opts.component ?? "app";
+
+  if (opts.silent) {
+    // Fully silent logger: tests exercising exception paths keep stderr clean
+    // while production call sites stay unchanged.
+    const noop = () => undefined;
+    return {
+      level,
+      child: (c: string) => createLogger({ ...opts, component: `${component}:${c}` }),
+      debug: noop,
+      info: noop,
+      warn: noop,
+      error: noop,
+    };
+  }
+
   const threshold = LEVELS[level];
 
   const log = (lv: LogLevel, msg: string, data?: Record<string, unknown>) => {
