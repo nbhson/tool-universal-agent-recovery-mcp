@@ -5,6 +5,7 @@ import { runMcpServer } from "./server.js";
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel, logFile: config.logFile, component: "mcp" });
+for (const w of config.warnings ?? []) logger.warn("configuration warning", { warning: w });
 
 runMcpServer(config, logger).catch((err) => {
   // Never write to stdout: it carries the MCP JSON-RPC protocol.

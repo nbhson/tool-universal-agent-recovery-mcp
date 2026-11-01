@@ -17,6 +17,8 @@ export interface RecoveryConfig {
   logDir: string;
   logLevel: "debug" | "info" | "warn" | "error";
   logFile: string | null;
+  /** Non-fatal configuration problems, e.g. invalid env values replaced by defaults. */
+  warnings?: string[];
 }
 
 /** Normalize and validate a working directory: absolute + resolved. */
@@ -53,38 +55,47 @@ export function assertAllowedDirectory(dir: string, allowedDirs: string[]): void
 
 const LOG_LEVELS = new Set(["debug", "info", "warn", "error"]);
 
-function logLevelOf(v: string | undefined): RecoveryConfig["logLevel"] {
+function logLevelOf(v: string | undefined, warnings: string[]): RecoveryConfig["logLevel"] {
   const level = (v ?? "").trim().toLowerCase();
+  if (v !== undefined && v !== "" && !LOG_LEVELS.has(level)) {
+    warnings.push(`RECOVERY_LOG_LEVEL='${v}' is not one of debug|info|warn|error — using 'info'`);
+  }
   return LOG_LEVELS.has(level) ? (level as RecoveryConfig["logLevel"]) : "info";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RecoveryConfig {
+  const warnings: string[] = [];
   const allowedDirs = (env.RECOVERY_ALLOWED_DIRS ?? "")
     .split(/[,;]/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0)
     .map((s) => normalizeSeparators(path.resolve(s)));
 
+  const int = (v: string | undefined, def: number, name: string): number => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+    if (v !== undefined && v.trim() !== "") {
+      warnings.push(`${name}='${v}' is not a positive number — using default ${def}`);
+    }
+    return def;
+  };
+
   return {
     dbPath: env.RECOVERY_DB_PATH ?? "./data/recovery.db",
     allowedDirs,
     recoveryEnabled: (env.RECOVERY_ENABLED ?? "true").toLowerCase() !== "false",
-    staleMs: intOf(env.RECOVERY_STALE_MS, 600_000),
-    maxConcurrent: intOf(env.RECOVERY_MAX_CONCURRENT, 2),
-    maxRuntimeMs: intOf(env.RECOVERY_MAX_RUNTIME_MS, 3_600_000),
-    maxAttempts: intOf(env.RECOVERY_MAX_ATTEMPTS, 5),
-    backoffBaseMs: intOf(env.RECOVERY_BACKOFF_BASE_MS, 30_000),
-    backoffMaxMs: intOf(env.RECOVERY_BACKOFF_MAX_MS, 1_800_000),
-    ownerLeaseMs: intOf(env.RECOVERY_OWNER_LEASE_MS, 300_000),
-    pollIntervalMs: intOf(env.RECOVERY_POLL_MS, 30_000),
+    staleMs: int(env.RECOVERY_STALE_MS, 600_000, "RECOVERY_STALE_MS"),
+    maxConcurrent: int(env.RECOVERY_MAX_CONCURRENT, 2, "RECOVERY_MAX_CONCURRENT"),
+    maxRuntimeMs: int(env.RECOVERY_MAX_RUNTIME_MS, 3_600_000, "RECOVERY_MAX_RUNTIME_MS"),
+    maxAttempts: int(env.RECOVERY_MAX_ATTEMPTS, 5, "RECOVERY_MAX_ATTEMPTS"),
+    backoffBaseMs: int(env.RECOVERY_BACKOFF_BASE_MS, 30_000, "RECOVERY_BACKOFF_BASE_MS"),
+    backoffMaxMs: int(env.RECOVERY_BACKOFF_MAX_MS, 1_800_000, "RECOVERY_BACKOFF_MAX_MS"),
+    ownerLeaseMs: int(env.RECOVERY_OWNER_LEASE_MS, 300_000, "RECOVERY_OWNER_LEASE_MS"),
+    pollIntervalMs: int(env.RECOVERY_POLL_MS, 30_000, "RECOVERY_POLL_MS"),
     // Agent output logs; relative by default (CWD-relative, as before).
     logDir: env.UAR_LOG_DIR && env.UAR_LOG_DIR.trim() !== "" ? env.UAR_LOG_DIR : path.join("logs", "agent-output"),
-    logLevel: logLevelOf(env.RECOVERY_LOG_LEVEL),
+    logLevel: logLevelOf(env.RECOVERY_LOG_LEVEL, warnings),
     logFile: env.RECOVERY_LOG_FILE || null,
+    warnings,
   };
-}
-
-function intOf(v: string | undefined, def: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : def;
 }

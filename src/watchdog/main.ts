@@ -7,6 +7,7 @@ import { WatchdogSupervisor } from "./supervisor.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger({ level: config.logLevel, logFile: config.logFile, component: "watchdog" });
+  for (const w of config.warnings ?? []) logger.warn("configuration warning", { warning: w });
 
   const registry = AdapterRegistry.fromEnv(process.env, logger);
 

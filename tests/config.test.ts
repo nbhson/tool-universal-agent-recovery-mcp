@@ -74,6 +74,18 @@ describe("loadConfig", () => {
     expect(loadConfig({ RECOVERY_LOG_LEVEL: "ERROR" }).logLevel).toBe("error");
   });
 
+  it("collects a warning for invalid numeric env values", () => {
+    const cfg = loadConfig({ RECOVERY_MAX_ATTEMPTS: "-3", RECOVERY_LOG_LEVEL: "verbose" });
+    expect(cfg.warnings).toHaveLength(2);
+    expect(cfg.warnings?.[0]).toContain("RECOVERY_MAX_ATTEMPTS='-3'");
+    expect(cfg.warnings?.[1]).toContain("RECOVERY_LOG_LEVEL='verbose'");
+  });
+
+  it("produces no warnings for a clean environment", () => {
+    expect(loadConfig({}).warnings).toEqual([]);
+    expect(loadConfig({ RECOVERY_STALE_MS: "120000" }).warnings).toEqual([]);
+  });
+
   it("disables recovery only on the exact 'false' value", () => {
     expect(loadConfig({ RECOVERY_ENABLED: "false" }).recoveryEnabled).toBe(false);
     expect(loadConfig({ RECOVERY_ENABLED: "0" }).recoveryEnabled).toBe(true);

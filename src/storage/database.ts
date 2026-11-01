@@ -6,6 +6,51 @@ import type { Logger } from "../core/logger.js";
 
 export const SCHEMA_VERSION = 1;
 
+/**
+ * Translate raw SQLite errors into actionable messages. Without this, users
+ * see opaque strings like "database is locked" with no hint about the cause.
+ */
+export function friendlyDbError(err: unknown, file: string): unknown {
+  if (!(err instanceof Error)) return err;
+  const msg = err.message;
+  const code = (err as NodeJS.ErrnoException).code ?? "";
+  if (code === "SQLITE_BUSY" || /database is locked/i.test(msg)) {
+    return new Error(
+      `SQLite database is locked (${file}). Another process (MCP server or watchdog) ` +
+        "is holding a write transaction, or the database is on a network filesystem " +
+        "(not supported with WAL). Wait a moment and retry, check for stale `uar-watchdog` " +
+        "processes (ps aux | grep uar-watchdog), or inspect the current state with `uar-state`.",
+    );
+  }
+  if (/unable to open database file/i.test(msg) || code === "SQLITE_CANTOPEN") {
+    return new Error(
+      `Cannot open SQLite database at '${file}'. Check that the directory exists and is ` +
+        "writable, and that RECOVERY_DB_PATH is the same for uar-mcp and uar-watchdog.",
+    );
+  }
+  if (/malformed database image|file is not a database/i.test(msg)) {
+    return new Error(
+      `The database file '${file}' is corrupt or not a SQLite database. ` +
+        "If the data is disposable, remove the file (and its -wal/-shm sidecars) and restart.",
+    );
+  }
+  return err;
+}
+
+function execWithRetry(db: DatabaseSync, sql: string, attempts = 20, delayMs = 50): void {
+  // PRAGMA journal_mode does not honor busy_timeout and can hit SQLITE_BUSY
+  // when two processes open a fresh database simultaneously; retry briefly.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      db.exec(sql);
+      return;
+    } catch (err) {
+      if (attempt >= attempts) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
+  }
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
@@ -91,10 +136,16 @@ export class Database {
     if (file !== ":memory:") {
       fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
     }
-    this.db = new DatabaseSync(file);
+    this.db = (() => {
+      try {
+        return new DatabaseSync(file);
+      } catch (err) {
+        throw friendlyDbError(err, file);
+      }
+    })();
     // WAL mode survives interrupted writes; busy_timeout serializes
     // concurrent MCP/watchdog writers instead of failing them.
-    this.db.exec("PRAGMA journal_mode = WAL;");
+    execWithRetry(this.db, "PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec("PRAGMA foreign_keys = ON;");
   }
@@ -141,7 +192,7 @@ export class Database {
       } catch {
         /* ignore */
       }
-      throw err;
+      throw friendlyDbError(err, "this database");
     }
   }
 
